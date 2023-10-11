@@ -1,77 +1,136 @@
+
 # load libraries ----
 library(dplyr)
 library(ggplot2)
+library(data.table)
 library(Seurat)
 library(SeuratObject)
-library(Giotto) # remotes::install_github("RubD/Giotto") 
 
-# load data ----
-merged_cortex = readRDS("data/Hypoxia_Cortex_Final.rds")
-
-dim(merged_cortex)
-unique(merged_cortex$CellType)
-unique(merged_cortex$CellSubType)
-unique(merged_cortex$orig.ident)
-
-Idents(merged_cortex) = "CellType"
-DimPlot(merged_cortex, reduction = "umap", label = TRUE, raster = FALSE)
-
-
-ImageDimPlot(merged_cortex, group.by = 'orig.ident', axes = TRUE)
-
-p1 <- ImageFeaturePlot(merged_cortex, features = "Cux2")
-p2 <- ImageDimPlot(merged_cortex, molecules = "Cux2", nmols = 1000, alpha = 1, mols.cols = "red")
-p1 + p2
-
-
-get_sample_data = function(data, sample) {
-  
-  meta = data@meta.data[data@meta.data[["orig.ident"]] == sample, c("orig.ident", "CellType", 'CellSubType')]
-  image = c(paste0(sample, "_ALL"), paste0(sample, "_ALL.1"))
-  
-  coors = data@images[[image]]@boundaries[["centroids"]]@coords
-  coordinates_df = as.data.frame(coors)
-  
-  cell_names = data@images[[image]]@boundaries[["centroids"]]@cells
-  rownames(coordinates_df) = cell_names
-  
-  meta$cell = rownames(meta)
-  coordinates_df$cell = rownames(coordinates_df)
-  
-  merged = merge(meta, coordinates_df, by = "cell")
-  
-  return(merged)
+# devtools::install_github("drieslab/Giotto@suite")
+library(Giotto) 
+# devtools::install_github("RubD/GiottoUtils")
+# devtools::install_github("RubD/GiottoClass")
+# devtools::install_github("drieslab/GiottoData")
+library(GiottoData) 
+if(!checkGiottoEnvironment()){
+  installGiottoEnvironment() # run once 
 }
 
-samps = unique(merged_cortex$orig.ident)
-tmp = do.call(rbind, lapply(samps, function(x) get_sample_data(merged_cortex, x)))
+# spatial enrichment analysis ----
 
-
-get_sample_data = function(data, sample, num_images=2) {
-  
-  meta = data@meta.data[data@meta.data[["orig.ident"]] == sample, c("orig.ident", "CellType", 'CellSubType')]
-  meta$cell = rownames(meta)
-  
-  image_names = sapply(0:(num_images-1), function(i) ifelse(i==0, paste0(sample, "_ALL"), paste0(sample, "_ALL.", i)))
-  
-  combined_coordinates_df = do.call(rbind, lapply(image_names, function(image) {
-    image_data = data@images[[image]]@boundaries[["centroids"]]
-    coordinates_df = as.data.frame(image_data@coords, row.names = image_data@cells)
-    coordinates_df$cell = rownames(coordinates_df)
-    return(coordinates_df)
+# for each sample 
+# - get cell identifiers 
+# - get x/y coordinates from image slot 
+get_spat_data = function(data, samples) {
+  do.call(rbind, lapply(samples, function(samp) {
+    img = data@images[[samp]]
+    data.frame(x = img@boundaries[["centroids"]]@coords[, 1], 
+               y = img@boundaries[["centroids"]]@coords[, 2], 
+               cell_ID = img@boundaries[["centroids"]]@cells)
   }))
+}
+
+# for each sample 
+# - create Giotto object 
+# - create Delaunay network 
+# - calculate cell proximity enrichments 
+get_cp_enrichments = function(samp, sobject, spatial_data) {
+  meta = subset(sobject@meta.data, subset = orig.ident == samp)
+  meta$cell_ID = rownames(meta)
   
-  return(merge(meta, combined_coordinates_df, by = "cell"))
+  gobject = createGiottoObject(
+    expression = sobject@assays[[sobject@active.assay]]@data[, meta$cell_ID],
+    spatial_locs = spatial_data[spatial_data$cell_ID %in% meta$cell_ID,],
+    cell_metadata = meta,
+    dimension_reduction = list(
+      pca = sobject@reductions$pca@cell.embeddings[meta$cell_ID, ],
+      umap = sobject@reductions$umap@cell.embeddings[meta$cell_ID, ])
+  )
+  
+  gobject = createSpatialDelaunayNetwork(gobject)
+  cpe_scores = cellProximityEnrichment(gobject, cluster_column = "CellType", # change cell resolution here 
+                                      number_of_simulations = 1000, adjust_method = "fdr") # change number of simulations 
+  
+  cpe_scores$raw_sim_table$ID = samp
+  cpe_scores$enrichm_res$ID = samp
+  cpe_scores$raw_sim_table$Condition = meta$Condition[1]
+  cpe_scores$enrichm_res$Condition = meta$Condition[1]
+  
+  return(cpe_scores)
+}
+
+# load data as Seurat object 
+sobject = readRDS("data/Hypoxia_Cortex_Final.rds")
+spatial_data = get_spat_data(sobject, names(sobject@images))
+
+samples = unique(sobject$orig.ident)
+results = lapply(samples, get_cp_enrichments, sobject, spatial_data)
+names(results) = samples
+
+# combine results across samples 
+comb_raw_sim_table = do.call(rbind, lapply(results, function(x) x$raw_sim_table))
+comb_enrichm_res = do.call(rbind, lapply(results, function(x) x$enrichm_res))
+
+fisher_method = function(p_vals){
+  p_vals[p_vals == 0] = .Machine$double.eps
+  -2 * sum(log(p_vals))
+}
+
+# summarize results for each condition (NX, HX)
+# - use Fisher method to combine p-values 
+# TODO: PI_value is currently averaged, consider recalcualting from combined p-value
+combine_results = function(condition){
+  enrichm_res = comb_enrichm_res %>%
+    filter(Condition == condition) %>%
+    group_by(unified_int, type_int, Condition) %>%
+    summarise(
+      across(c(original, simulations, enrichm, PI_value, int_ranking), mean),
+      across(c(p_higher_orig, p_lower_orig, p.adj_higher, p.adj_lower), fisher_method)) %>%
+    ungroup() %>% as.data.table()
+  
+  raw_sim_table = comb_raw_sim_table %>%
+    filter(Condition == condition) %>%
+    group_by(unified_int, type_int, round, orig, Condition) %>%
+    summarise(V1 = mean(V1, na.rm = TRUE)) %>%
+    ungroup() %>% as.data.table()
+  
+  list(enrichm_res = enrichm_res, raw_sim_table = raw_sim_table)
+}
+
+# plotting 
+for(condition in c("NX", "HX")){
+  results = combine_results(condition)
+  
+  cellProximityBarplot(gobject = NULL, results, p_val = 0.05, show_plot = TRUE, return_plot = FALSE, save_plot = FALSE)
+  cellProximityHeatmap(gobject = NULL, results, show_plot = TRUE, return_plot = FALSE, save_plot = FALSE) 
+  cellProximityNetwork(gobject = NULL, results, show_plot = TRUE, return_plot = FALSE, save_plot = FALSE)
 }
 
 
 
-# Subset Seurat object for a specific sample
-specific_sample <- "HX1"  # replace with your desired sample name
-subset_data <- subset(merged_cortex, subset = orig.ident == specific_sample)
 
-# Plot the spatial data for the subset
-ImageDimPlot(subset_data, axes = TRUE)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
