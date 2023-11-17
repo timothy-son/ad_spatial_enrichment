@@ -293,43 +293,50 @@ plot_diff_barplot = function(spat_diff, n = 20, sig_level = 0.01) {
 #' @examples
 #' plot_diff_network(spat_diff, 0.05, TRUE)
 
-plot_diff_network = function(spat_diff, sig_level = 0.05, plot_insignificant = FALSE) {
-  
-  edges_to_plot = if(plot_insignificant) {
-    spat_diff
-  } else {
-    spat_diff[spat_diff$padj < sig_level, ]
-  }
+plot_diff_network = function(spat_diff, sig_level = 0.05, plot_insignificant = FALSE, 
+                             show_arrows = TRUE) {
+  edges_to_plot = if(plot_insignificant) spat_diff 
+  else spat_diff[spat_diff$padj < sig_level, ]
   
   igraph_network = graph_from_data_frame(
     d = edges_to_plot[, c('cell_type_a', 'cell_type_b')], directed = TRUE)
   
   E(igraph_network)$weight = abs(edges_to_plot$estimate)
-  E(igraph_network)$alpha = scales::rescale(edges_to_plot$estimate, to = c(0.1, 1))
+  E(igraph_network)$alpha = scales::rescale(
+    edges_to_plot$estimate, to = c(0.1, 1))
+  
   E(igraph_network)$color = ifelse(
-    edges_to_plot$padj < sig_level,
-    ifelse(edges_to_plot$estimate > 0, 'positive', 'negative'),
+    edges_to_plot$padj < sig_level, 
+    ifelse(edges_to_plot$estimate > 0, 'positive', 'negative'), 
     'insignificant')
   
   node_colors = setNames(
     colorRampPalette(RColorBrewer::brewer.pal(9, "Set1"))(
-      length(unique(c(spat_diff$cell_type_a, spat_diff$cell_type_b)))
-    ),
-    unique(c(spat_diff$cell_type_a, spat_diff$cell_type_b))
+      length(unique(c(edges_to_plot$cell_type_a, 
+                      edges_to_plot$cell_type_b)))
+    ), unique(c(edges_to_plot$cell_type_a, edges_to_plot$cell_type_b))
   )
+  
   # For other options see: https://igraph.org/r/doc/layout_.html
   layout = layout_in_circle(igraph_network)
+  arrow_type = if(show_arrows) arrow(length = unit(4, 'mm'), type = 'closed', ends = 'first') else NULL
   
   ggraph(igraph_network, layout = layout) +
-    geom_edge_link(aes(edge_width = weight, color = color, alpha = alpha)) +
-    geom_edge_loop(aes(color = color, edge_width = weight, alpha = alpha, strength = 0.5)) +
+    geom_edge_link(
+      aes(edge_width = weight, color = color, alpha = alpha), 
+      arrow = arrow_type
+    ) +
+    geom_edge_loop(
+      aes(color = color, edge_width = weight, alpha = alpha, strength = 0.5)
+    ) +
     scale_edge_width_continuous(range = c(0.1, 3)) +
     scale_edge_alpha_continuous(range = c(0.1, 1)) + 
     geom_node_point(aes(color = name), size = 5, show.legend = FALSE) +
     geom_node_text(aes(label = name), repel = TRUE, size = 5, show.legend = FALSE) +
     scale_edge_color_manual(
-      values = c('positive' = 'red', 'negative' = 'blue',
-                 'insignificant' = if(plot_insignificant) 'gray95' else NA)) +
+      values = c('positive' = 'red', 'negative' = 'blue', 
+                 'insignificant' = if(plot_insignificant) 'gray95' else NA)
+    ) +
     theme_void() +
     guides(color = guide_legend())
 }
@@ -338,8 +345,8 @@ plot_diff_network = function(spat_diff, sig_level = 0.05, plot_insignificant = F
 
 # Load Seurat object
 sobject = readRDS("data/Hypoxia_Cortex_Final.rds")
-sobject = readRDS("data/SVZ_neuronal_subset_Seurat_FINAL.rds")
-sobject = readRDS("data/CC_FINAL_dims10Seurat_Annotated.rds")
+#sobject = readRDS("data/SVZ_neuronal_subset_Seurat_FINAL.rds")
+#sobject = readRDS("data/CC_FINAL_dims10Seurat_Annotated.rds")
 
 # Get spatial coordinates and clean cell type lables
 spat_data = get_spatial_data(sobject) %>%
@@ -354,7 +361,7 @@ spat_stats = bind_rows(
     data = r_to_py(data)
     # See 'python_functions.py' for 'get_spatial_stats' documentation
     # Selection of d_max_scale is important
-    stats = get_spatial_stats(data, "CellSubType", d_min_scale = 0, d_max_scale = 10)
+    stats = get_spatial_stats(data, "CellSubType", d_min_scale = 0, d_max_scale = 20)
     stats$cell_type_pair = paste(stats$cell_type_a, stats$cell_type_b, sep = "-")
     return(stats)
   })
@@ -365,17 +372,16 @@ plot_stats_heatmap(spat_stats)
 # Get differential proximities (estimate) between conditions
 # Singular fits may occur and are removed from the results 
 # Adjust thresholds if too many cell types are removed 
-spat_diff = get_spatial_differences(spat_stats, min_nonzero_threshold = 0.20, 
+spat_diff = get_spatial_differences(spat_stats, 
+                                    min_nonzero_threshold = 0.20, 
                                     min_data_count_threshold = 10, ref_level = "NX")
 
 # Differential cell type proximity plots 
 plot_diff_heatmap(spat_diff, opt_order = F, sig_level = 0.05)
 plot_diff_barplot(spat_diff, n = 20, sig_level = 0.05)
-plot_diff_network(spat_diff, sig_level = 0.05, plot_insignificant = T)
+plot_diff_network(spat_diff, sig_level = 0.05, plot_insignificant = F, show_arrows = T)
 
 ################################################################################
-
-
 
 
 
