@@ -52,7 +52,7 @@ get_spatial_data = function(seurat_object) {
       x = data@boundaries[["centroids"]]@coords[, 1],
       y = data@boundaries[["centroids"]]@coords[, 2],
       cell_ID = data@boundaries[["centroids"]]@cells
-      ) %>% 
+    ) %>% 
       inner_join(meta, by = "cell_ID") %>% 
       mutate(image_ID = i)}) %>% 
     bind_rows()
@@ -107,7 +107,7 @@ get_spatial_differences = function(spat_stats,
       if (!is.null(model_fit)) {
         model_fit$cell_type_pair = paste(
           unique(.$cell_type_a), unique(.$cell_type_b), sep = "-"
-          )
+        )
         model_fit$singular_fit = singular_fit
       }
       model_fit
@@ -222,7 +222,7 @@ plot_diff_heatmap = function(spat_diff, opt_order = FALSE, sig_level = 0.05) {
   pheatmap(mat_beta, 
            display_numbers = mat_sig,
            main = main, 
-           na_col = "white",
+           na_col = "lightgrey",
            number_color = "white",
            fontsize_number = 20,
            color = colorRampPalette(c("darkblue","blue","white","red","darkred"))(51), 
@@ -256,7 +256,7 @@ plot_diff_barplot = function(spat_diff, n = 20, sig_level = 0.01) {
       y_pos = ifelse(estimate >= 0, 
                      estimate + std.error + 0.05, 
                      estimate - std.error - 0.05)
-      ) %>%
+    ) %>%
     group_by(sign = estimate >= 0) %>%
     top_n(n, if_else(sign, estimate, -estimate)) %>%
     ungroup() %>%
@@ -362,7 +362,7 @@ spat_stats = bind_rows(
     data = r_to_py(data)
     # See 'python_functions.py' for 'get_spatial_stats' documentation
     # Selection of d_max_scale is important
-    stats = get_spatial_stats(data, "CellSubType", d_min_scale = 0, d_max_scale = 20)
+    stats = get_spatial_stats(data, "CellSubType", d_min_scale = 0, d_max_scale = 5)
     stats$cell_type_pair = paste(stats$cell_type_a, stats$cell_type_b, sep = "-")
     return(stats)
   })
@@ -384,64 +384,4 @@ plot_diff_network(spat_diff, sig_level = 0.05, plot_insignificant = F, show_arro
 
 ################################################################################
 
-
-# Load Seurat object
-sobject = readRDS("data/Hypoxia_Cortex_Final.rds")
-
-# Get spatial coordinates and clean cell type lables
-spat_data = get_spatial_data(sobject) %>%
-  mutate(across(c("CellType", "CellSubType"), ~str_replace_all(.x, " - ", "_") %>%
-                  str_replace_all(" ", "_")))
-
-# For each sample, get cell type proximities 
-
-step_size = 10
-
-samples = unique(spat_data$sample_ID)
-spat_stats = bind_rows(
-  lapply(samples, function(s) {
-    data = subset(spat_data, sample_ID == s) %>% r_to_py()
-     bind_rows(
-       lapply(seq(0, 100, by = step_size), function(d_min) {
-         d_max = d_min + step_size
-         stats = get_spatial_stats(data, "CellSubType", d_min_scale = d_min, d_max_scale = d_max)
-         stats$cell_type_pair = paste(stats$cell_type_a, stats$cell_type_b, sep = "-")
-         stats$d_min_scale = d_min
-         stats$d_max_scale = d_max
-         return(stats)
-         })
-       )
-     })
-  )
-#saveRDS(spat_stats, file = "./output/spat_stats_cortex_d0-d100.rds")
-
-spat_stats = readRDS(file = "./output/spat_stats_cortex_d0-d100.rds")
-spat_stats_sum = as.data.table(spat_stats)
-spat_stats_sum = spat_stats_sum[, .(b_ratio_mean = mean(b_ratio), 
-                                    b_ratio_SE = sd(b_ratio) / sqrt(length(b_ratio))),
-                                by = .(condition, cell_type_pair, d_min_scale, d_max_scale)]
-
-
-
-
-
-
-
-
-
-
-
-
-spat_stats %>%
-  filter(condition == "HX") %>%
-  group_by(d_min_scale, d_max_scale) %>%
-  group_walk(~plot_stats_heatmap(.x))
-
-
-
-spat_stats %>%
-  filter(b_ratio > 0) %>%
-  ggplot(., aes(b_ratio, color = sample_ID)) +
-  geom_density(alpha = 0.1) +
-  theme_classic()
 

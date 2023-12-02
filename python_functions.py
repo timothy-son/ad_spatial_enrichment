@@ -49,6 +49,7 @@ def get_spatial_stats(spatial_data, cell_type_column, d_min_scale=0, d_max_scale
     if d_min > 0:
         pairs -= tree.query_pairs(d_min)
     mat = np.array(list(pairs))
+    mat = np.concatenate((mat, mat[:, ::-1]))
     sparse_mat = coo_array((np.ones(len(mat), dtype=bool), mat.T),
         shape=(len(spatial_data), len(spatial_data))).tocsr()
 
