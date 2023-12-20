@@ -1,3 +1,11 @@
+import pandas as pd
+import numpy as np
+import gc
+from scipy.spatial import KDTree
+from scipy.sparse import coo_array
+from scipy.stats import pearsonr
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 """Calculate spatial statistics for cell types within a spatial dataset.
 
@@ -29,21 +37,14 @@ Usage Example:
 results_df = get_spatial_stats(spatial_data=df, cell_type_column='cell_type', d_min_scale=1, d_max_scale=5)
 """
 
-import pandas as pd
-import numpy as np
-from scipy.spatial import KDTree
-from scipy.sparse import coo_array
-
-def get_spatial_stats(spatial_data, cell_type_column, d_min_scale=0, d_max_scale=20):
+def get_spatial_stats(spatial_data, cell_type_column, d_min_scale=0, d_max_scale=5, verbose=False):
     tree = KDTree(spatial_data[['x', 'y']])
     d_scale = np.median(tree.query(spatial_data[['x', 'y']], k=2)[0][:, 1])
     
     d_min = d_min_scale * d_scale
     d_max = d_max_scale * d_scale
-    
-    condition = spatial_data['Condition'].unique()[0]
-    orig_ident = spatial_data['orig.ident'].unique()[0]
-    print(f"d_scale {orig_ident}: {d_scale}")
+    if verbose:
+      print(f"d_scale {orig_ident}: {d_scale}")
     
     pairs = tree.query_pairs(d_max)
     if d_min > 0:
@@ -52,6 +53,9 @@ def get_spatial_stats(spatial_data, cell_type_column, d_min_scale=0, d_max_scale
     mat = np.concatenate((mat, mat[:, ::-1]))
     sparse_mat = coo_array((np.ones(len(mat), dtype=bool), mat.T),
         shape=(len(spatial_data), len(spatial_data))).tocsr()
+        
+    condition = spatial_data['Condition'].unique()[0]
+    orig_ident = spatial_data['orig.ident'].unique()[0]
 
     results = []
     for cell_type_b in spatial_data[cell_type_column].unique():
@@ -73,4 +77,5 @@ def get_spatial_stats(spatial_data, cell_type_column, d_min_scale=0, d_max_scale
             'sample_ID': orig_ident
         }))
     results = pd.concat(results).reset_index()
+    gc.collect()
     return results
