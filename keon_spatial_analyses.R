@@ -300,7 +300,8 @@ plot_stats_heatmap = function(spat_stats, opt_order = FALSE) {
 
 plot_diff_heatmap = function(spat_diff, opt_order = FALSE, sig_level = 0.05, main = "") {
   
-  all_cell_types = unique(c(spat_diff$cell_type_a, spat_diff$cell_type_b))
+  all_cell_types = unique(c(as.character(spat_diff$cell_type_a), 
+                            as.character(spat_diff$cell_type_b)))
   complete_grid = expand.grid(cell_type_a = all_cell_types, 
                               cell_type_b = all_cell_types)
   
@@ -457,9 +458,9 @@ plot_diff_network = function(spat_diff, sig_level = 0.05, plot_insignificant = F
 # cell proximity analysis #######################################################
 
 # Load Seurat object
-sobject = readRDS("data/HX_Cortex.rds")
+#sobject = readRDS("data/HX_Cortex.rds")
 #sobject = readRDS("data/SVZ_neuronal_subset_Seurat_FINAL.rds")
-#sobject = readRDS("data/CC_FINAL_dims10Seurat_Annotated.rds")
+sobject = readRDS("data/CC_FINAL_dims10Seurat_Annotated.rds")
 
 # For each sample, get cell type proximities 
 samples = unique(sobject@meta.data$orig.ident)
@@ -483,11 +484,17 @@ spat_diff = get_spatial_differences(
 )
 
 # Differential cell type proximity plots 
-svglite::svglite(filename = "./figures/cell_type_proximity/diff_heatmap_CC.svg", height = 6, width = 7)
-plot_diff_heatmap(spat_diff, opt_order = F, sig_level = 0.10, main = "Differential Cell Type Proximity -- CC")
+svglite::svglite(filename = "./figures/cell_type_proximity/diff_heatmap_CC_05.svg", height = 6, width = 7)
+plot_diff_heatmap(spat_diff, opt_order = F, sig_level = 0.05)
 dev.off()
 
 plot_diff_barplot(spat_diff, n = 10, sig_level = 0.05)
 plot_diff_network(spat_diff, sig_level = 0.05, plot_insignificant = T, show_arrows = T)
+
+
+
+
+
+
 
 
