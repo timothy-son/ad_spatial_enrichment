@@ -45,15 +45,18 @@ source_python("./python_functions.py")
 #'
 #' @examples
 #'
-#' # Retrieve spatial data from a Seurat object with sample filtering and cell type information
-#' get_spatial_data(seurat_object, cell_type_column = "cell_type", sample = c("Sample1", "Sample2"))
-#'
+#' # Retrieve spatial data from a Seurat object with sample filtering and cell 
+#' type information:
+#' 
+#' get_spatial_data(seurat_object, cell_type_column = "cell_type", 
+#' sample = c("Sample1", "Sample2"))
 
 get_spatial_data = function(seurat_object, cell_type_column, sample=NULL) {
   images = names(seurat_object@images)
   meta = seurat_object@meta.data %>% 
     mutate(cell_ID = row.names(.), sample_ID = orig.ident) 
-    #mutate(!!cell_type_column := str_replace_all(!!sym(cell_type_column), " ", "")) 
+    # mutate(!!cell_type_column := str_replace_all(
+    #   !!sym(cell_type_column), " ", "")) 
   if (!is.null(sample)) {
     meta = filter(meta, sample_ID %in% sample)
   }
@@ -93,6 +96,7 @@ get_spatial_data = function(seurat_object, cell_type_column, sample=NULL) {
 #' get_expression_data(seurat_object)
 #'
 #' # Retrieve expression data from a Seurat object with sample filtering
+#' get_expression_data(seurat_object, sample = "NX1")
 
 get_expression_data = function(seurat_object, sample=NULL) {
   meta = seurat_object@meta.data %>% 
@@ -110,11 +114,13 @@ get_expression_data = function(seurat_object, sample=NULL) {
 
 #' Retrieve Ligand-Receptor Pairs from NeuronChat and CellChat Databases
 #'
-#' This function consolidates ligand-receptor interaction data from two distinct sources: NeuronChat and CellChat. 
-#' It processes data from the interaction databases of both packages, formats them into a uniform structure, 
+#' This function consolidates ligand-receptor interaction data from two distinct
+#' sources: NeuronChat and CellChat. It processes data from the interaction
+#' databases of both packages, formats them into a uniform structure, 
 #' and combines them into a single data frame for further analysis.
 #'
-#' @return A data frame containing consolidated ligand-receptor pairs with the following columns:
+#' @return A data frame containing consolidated ligand-receptor pairs with 
+#' the following columns:
 #'   - interaction_name: Name of the interaction.
 #'   - ligand: Name of the ligand involved in the interaction.
 #'   - receptor: Name of the receptor involved in the interaction.
@@ -154,11 +160,13 @@ get_LR_pairs = function() {
   return(LR_pairs)
 }
 
-#' Calculate differential spatial statistics for cell types between two conditions.
+#' Calculate differential spatial statistics for cell types
+#'between two conditions.
 #'
-#' This function evaluates spatial differences between cell types in different conditions using a
-#' generalized linear mixed-effects model (GLMM). It filters and prepares data based on specified thresholds,
-#' and then applies the GLMM to assess the impact of conditions on the spatial distribution of cell types.
+#' This function evaluates spatial differences between cell types in different
+#' conditions using a generalized linear mixed-effects model (GLMM). It filters
+#' and prepares data based on specified thresholds, and then applies the GLMM
+#' to assess the impact of conditions on the spatial distribution of cell types.
 #'
 #' @param spat_stats A data frame containing spatial statistics, which is the 
 #' output of 'get_spatial_stats'. 
@@ -224,6 +232,10 @@ get_spatial_differences = function(spat_stats,
     filter(str_detect(term, "condition")) %>%
     mutate(term = "condition", 
            padj = p.adjust(p.value, "BH"),
+           ref_samples = list(
+             spat_stats %>% filter(condition == ref_level) %>% pull(sample_ID) %>%
+               unique() %>% as.character()),
+           ref_level = ref_level,
            cell_type_pair = paste(cell_type_a, cell_type_b, sep = " -- "))
 }
 
@@ -271,7 +283,7 @@ plot_stats_heatmap = function(spat_stats, opt_order = FALSE) {
     pheatmap(mat, 
              main = main, 
              na_col = "lightgrey",
-             color = colorRampPalette(c("white", "red", "red", "darkred"))(50), 
+             color = colorRampPalette(c("white", "#813e8f", "#813e8f", "#4b0857"))(50), 
              breaks = seq(0, 1, length.out = 51),
              display_numbers = FALSE, border_color = NA, 
              cluster_rows = FALSE, cluster_cols = FALSE)
@@ -325,8 +337,10 @@ plot_diff_heatmap = function(spat_diff, opt_order = FALSE, sig_level = 0.05, mai
   mat_sig[mat_sig != "*"] = ""
   mat_sig[is.na(mat_sig)] = ""
   if (opt_order) {
-    o1 = seriate(dist(mat_beta), method = "OLO")[[1]]$order
-    o2 = seriate(dist(t(mat_beta)), method = "OLO")[[1]]$order
+    mat_tmp = mat_beta
+    mat_tmp[is.na(mat_tmp)] = 0
+    o1 = seriate(dist(mat_tmp), method = "OLO")[[1]]$order
+    o2 = seriate(dist(t(mat_tmp)), method = "OLO")[[1]]$order
     mat_beta = mat_beta[o1, o2]
     mat_sig = mat_sig[o1, o2]
   }
@@ -337,7 +351,8 @@ plot_diff_heatmap = function(spat_diff, opt_order = FALSE, sig_level = 0.05, mai
            na_col = "lightgrey",
            number_color = "white",
            fontsize_number = 20,
-           color = colorRampPalette(c("darkblue","blue","white","red","darkred"))(51), 
+           color = colorRampPalette(
+             c("#156a2f","#66b66b","#66b66b","white","#813e8f","#813e8f","#4b0857"))(51), 
            breaks = seq(-max_abs, max_abs, length.out = 52),
            border_color = NA, cluster_rows = F, cluster_cols = F)
 }
@@ -381,7 +396,7 @@ plot_diff_barplot = function(spat_diff, n = 20, sig_level = 0.01) {
     geom_errorbar(aes(ymin = estimate - std.error, 
                       ymax = estimate + std.error), width = 0.2) +
     coord_flip() +
-    scale_fill_manual(values = c("blue", "red"), 
+    scale_fill_manual(values = c("#66b66b", "#813e8f"), 
                       labels = c("decrease", "increase")) +
     labs(x = "Cell Type Pair", y = "Differential Cell Density Change", fill = "") +
     theme_minimal() +
@@ -448,19 +463,176 @@ plot_diff_network = function(spat_diff, sig_level = 0.05, plot_insignificant = F
     scale_edge_alpha_continuous(range = c(0.1, 1)) + 
     geom_node_text(aes(label = name), repel = TRUE, size = 5, show.legend = FALSE) +
     scale_edge_color_manual(
-      values = c('positive' = 'red', 'negative' = 'blue', 
+      values = c('positive' = '#813e8f', 'negative' = '#66b66b', 
                  'insignificant' = if(plot_insignificant) 'gray95' else NA)
     ) +
     theme_void() +
     guides(color = guide_legend())
 }
 
+#' Visualize spatial exemplars to highlight differential spatial statistics.
+#'
+#' Spatial plots indicating the distribution of select center and surround 
+#' cell types between conditions. An additional violin plot shows the distribution
+#' of the b_ratios of cell type b for every cell of type a in the selected samples.
+#' The function will automatically select two sample from each condition that 
+#' have the most comparable cell densities.  
+#' 
+#' This is function is not fully tested. It is common to see poorly representative
+#' spatial plots given the sparcity of MERFISH.
+#' 
+#' @param spat_stats A data frame containing spatial statistics, which is the output
+#' of 'get_spatial_stats'.
+#' @param spat_diff A data frame containing differential spatial statistics, which
+#' is the output of 'get_spatial_differences'.
+#' @param cell_type_column A character string specifying the column in 'spat_stats'
+#' that contains cell type information.
+#' @param cell_type_a A character string specifying the first cell type of interest.
+#' @param cell_type_b A character string specifying the second cell type of interest.
+#' @param min_b_count A numeric value representing the minimum count of 'b' cells
+#' required for a cell to be considered in analysis. Default is 0.
+#' @param min_all_count A numeric value representing the minimum total count of cells
+#' required for a cell to be considered in analysis. Default is 0.
+#' @param sample_area A numeric value specifying the side length of the square area
+#' around the central cell for visualization. Default is 120.
+#' @param seed An optional integer value to set the seed for random number generation,
+#' ensuring reproducibility. Default is NULL.
+#'
+#' @return A list of ggplot objects for each selected sample, illustrating the spatial
+#' distribution of cell types within the specified area and a violin and boxplot
+#' comparison of log-transformed counts between conditions.
+#'
+#' @examples
+#' spat_stats = get_spatial_stats(data)
+#' spat_diff = get_spatial_differences(spat_stats, ref_level = "control")
+#' plot_spatial_exemplars(spat_stats, spat_diff, "cell_type", "T_cells", "B_cells")
+#'
+#' @seealso
+#' get_spatial_stats and get_spatial_differences for required input data frames.
+#' ggplot for the underlying plotting system used.
+
+plot_spatial_exemplars = function(spat_stats, 
+                                  spat_diff, 
+                                  cell_type_column,
+                                  select_cell_type_a, select_cell_type_b, 
+                                  min_b_count = 0, min_all_count = 0,
+                                  sample_area = 120,
+                                  seed = NULL) {
+  
+  select_samples = spat_stats %>%
+    group_by(condition, sample_ID) %>%
+    summarise(d_max = unique(d_max), .groups = 'drop') %>%
+    expand_grid(HX = .[.$condition == "HX", ], NX = .[.$condition == "NX", ]) %>%
+    mutate(diff = abs(HX$d_max - NX$d_max)) %>%
+    arrange(diff) %>%
+    slice(1) %>%
+    summarise(HX_ID = HX$sample_ID, NX_ID = NX$sample_ID) %>%
+    as.character()
+  
+  circle_fun = function(center = c(0,0), r = 1, npoints = 100){
+    tt = seq(0, 2*pi,length.out = npoints)
+    xx = center[1] + r * cos(tt)
+    yy = center[2] + r * sin(tt)
+    return(data.frame(x = xx, y = yy))
+  }
+  plt_lst = NULL
+  for(samp in select_samples) {
+    eff = spat_diff %>%
+      filter(cell_type_a == select_cell_type_a, 
+             cell_type_b == select_cell_type_b) %>%
+      pull(estimate) %>%
+      sign()
+    filter_cells = spat_stats %>%
+      filter(sample_ID == samp, 
+             cell_type_a == select_cell_type_a, 
+             cell_type_b == select_cell_type_b) %>%
+      mutate(b_ratio_quantile = ntile(b_ratio, 4))
+    if(!is.null(seed)){
+      set.seed(seed)
+    }
+    if((samp %in% unlist(spat_diff$ref_samples)) == (eff > 0)) {
+      target_quantiles = c(1, 2)
+    } else {
+      target_quantiles = c(4, 3)
+    }
+    select_cell_id = NULL
+    for(quantile in target_quantiles) {
+      select_cell_id = filter_cells %>%
+        filter(b_ratio_quantile == quantile,
+               b_count > min_b_count, 
+               all_count > min_all_count)
+      if(nrow(select_cell_id) > 0) break
+    }
+    if(nrow(select_cell_id) == 0) {
+      print("Selected cell type is too sparse in individual samples. 
+            Or adjust min_b_count / min_all_count.")
+    } else {
+      select_cell_id = select_cell_id %>%
+        sample_n(size = 1) %>%
+        pull(cell_ID)
+    }
+    spat_data = get_spatial_data(sobject, sample = samp)
+    select_cell  = spat_data %>% filter(cell_ID == select_cell_id)
+    d_max = spat_stats %>% filter(sample_ID == samp) %>% pull(d_max) %>% unique()
+    
+    spat_data_square = spat_data %>%
+      filter(x >= select_cell$x - sample_area, 
+             x <= select_cell$x + sample_area,
+             y >= select_cell$y - sample_area, 
+             y <= select_cell$y + sample_area) %>%
+      mutate(across(all_of(cell_type_column),
+                    ~case_when(. %in% c(select_cell_type_a, select_cell_type_b) ~ .,
+                               TRUE ~ NA_character_)))
+    plt_lst[[samp]] = ggplot() +
+      geom_path(data = circle_fun(c(select_cell$x, select_cell$y), r = d_max/4), 
+                aes(x, y), linewidth = 1, linetype = "solid", color = "lightgrey") +
+      geom_path(data = circle_fun(c(select_cell$x, select_cell$y), r = d_max/2), 
+                aes(x, y), linewidth = 1, linetype = "solid", color = "lightgrey") + 
+      geom_path(data = circle_fun(c(select_cell$x, select_cell$y), r = d_max),
+                aes(x, y), linewidth = 1, linetype = "solid", color = "black") +
+      geom_point(data = spat_data_square %>% 
+                   filter(!.data[[cell_type_column]] %in% 
+                          c(select_cell_type_a, select_cell_type_b)), 
+                 aes(x, y), size = 3, shape = 16, color = "lightgrey") + 
+      geom_point(data = spat_data_square %>%
+                   filter(.data[[cell_type_column]] == select_cell_type_b), 
+                 aes(x, y), size = 4, shape = 16, color = "dodgerblue") + 
+      geom_point(data = spat_data_square %>%
+                   filter(.data[[cell_type_column]] == select_cell_type_a), 
+                 aes(x, y), size = 4, shape = 16, color = "firebrick") + 
+      geom_point(data = spat_data_square %>%
+                   filter(cell_ID == select_cell_id), 
+                 aes(x, y), size = 8, shape = 16, color = "firebrick") + 
+      theme_void() +
+      theme(legend.position = "none")
+  }
+  p1 = plt_lst[[1]]
+  p2 = plt_lst[[2]]
+  p3 = spat_stats %>%
+    filter(#sample_ID %in% select_samples,
+           cell_type_a == cell_type_a,
+           cell_type_b == cell_type_b) %>%
+    mutate(condition, factor(condition, levels = c("NX","HX"))) %>%
+    ggplot(., aes(x = condition, y = log(b_ratio))) +
+    geom_violin(lwd = 1) +
+    geom_boxplot(aes(fill = condition), width = 0.05, lwd = 1) +
+    scale_fill_manual(values = c("#813e8f",'#66b66b')) +
+    ggpubr::stat_compare_means(method = "t.test", label.x = 1.3) + 
+    labs(x = "", y = "Log Count (Surround Cell)") + 
+    theme_classic() +
+    theme(
+      legend.position = "none",
+      axis.line = element_line(linewidth = 1))
+  
+  p1 / p2 | p3
+} 
+
 # cell proximity analysis #######################################################
 
 # Load Seurat object
-#sobject = readRDS("data/HX_Cortex.rds")
-#sobject = readRDS("data/SVZ_neuronal_subset_Seurat_FINAL.rds")
+sobject = readRDS("data/HX_Cortex.rds")
 sobject = readRDS("data/CC_FINAL_dims10Seurat_Annotated.rds")
+sobject = readRDS("data/SVZ_neuronal_subset_Seurat_FINAL.rds")
 
 # For each sample, get cell type proximities 
 samples = unique(sobject@meta.data$orig.ident)
@@ -469,7 +641,8 @@ spat_stats = bind_rows(
     spat_data = get_spatial_data(sobject, cell_type_column = "CellSubType", s)
     spat_data = r_to_py(spat_data)
     # See 'python_functions.py' for 'get_spatial_stats' documentation
-    stats = get_spatial_stats(spat_data, cell_type_column = "CellSubType", d_min_scale = 0, d_max_scale = 5) %>%
+    stats = get_spatial_stats(spat_data, cell_type_column = "CellSubType", 
+                              d_min_scale = 0, d_max_scale = 10) %>%
       mutate(cell_type_pair = paste(cell_type_a, cell_type_b, sep = " -- "))
     return(stats)
   })
@@ -484,12 +657,29 @@ spat_diff = get_spatial_differences(
 )
 
 # Differential cell type proximity plots 
-svglite::svglite(filename = "./figures/cell_type_proximity/diff_heatmap_CC_05.svg", height = 6, width = 7)
+svglite::svglite(filename = "./figures/cell_type_proximity/diff_heatmap_CORTEX_05_pg.svg",
+                 height = 8, width = 9) 
 plot_diff_heatmap(spat_diff, opt_order = F, sig_level = 0.05)
 dev.off()
 
 plot_diff_barplot(spat_diff, n = 10, sig_level = 0.05)
 plot_diff_network(spat_diff, sig_level = 0.05, plot_insignificant = T, show_arrows = T)
+
+plot_spatial_exemplars(spat_stats, spat_diff, cell_type_column = "CellSubType", 
+                       select_cell_type_a = "Pre-OL", 
+                       select_cell_type_b = "Homeostatic astrocytes 2",
+                       sample_area = 120,
+                       seed = 123)
+
+
+
+
+
+
+
+
+
+
 
 
 
