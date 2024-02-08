@@ -618,7 +618,7 @@ plot_spatial_exemplars = function(spat_stats,
     geom_boxplot(aes(fill = condition), width = 0.05, lwd = 1) +
     scale_fill_manual(values = c("#813e8f",'#66b66b')) +
     ggpubr::stat_compare_means(method = "t.test", label.x = 1.3) + 
-    labs(x = "", y = "Log Count (Surround Cell)") + 
+    labs(x = "", y = "Log B Ratio (Surround Cell)") + 
     theme_classic() +
     theme(
       legend.position = "none",
@@ -631,8 +631,8 @@ plot_spatial_exemplars = function(spat_stats,
 
 # Load Seurat object
 sobject = readRDS("data/HX_Cortex.rds")
-sobject = readRDS("data/CC_FINAL_dims10Seurat_Annotated.rds")
-sobject = readRDS("data/SVZ_neuronal_subset_Seurat_FINAL.rds")
+# sobject = readRDS("data/CC_FINAL_dims10Seurat_Annotated.rds")
+# sobject = readRDS("data/SVZ_neuronal_subset_Seurat_FINAL.rds")
 
 # For each sample, get cell type proximities 
 samples = unique(sobject@meta.data$orig.ident)
