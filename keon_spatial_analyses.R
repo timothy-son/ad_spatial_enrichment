@@ -475,11 +475,11 @@ plot_diff_network = function(spat_diff, sig_level = 0.05, plot_insignificant = F
 #' Spatial plots indicating the distribution of select center and surround 
 #' cell types between conditions. An additional violin plot shows the distribution
 #' of the b_ratios of cell type b for every cell of type a in the selected samples.
-#' The function will automatically select two sample from each condition that 
+#' The function will automatically select two samples from each condition that 
 #' have the most comparable cell densities.  
 #' 
-#' This is function is not fully tested. It is common to see poorly representative
-#' spatial plots given the sparcity of MERFISH.
+#' This function is not fully tested. It is common to see poorly representative
+#' spatial plots given the sparsity of MERFISH.
 #' 
 #' @param spat_stats A data frame containing spatial statistics, which is the output
 #' of 'get_spatial_stats'.
