@@ -54,7 +54,7 @@ def get_spatial_stats(spatial_data, cell_type_column, d_min_scale=0, d_max_scale
     sparse_mat = coo_array((np.ones(len(mat), dtype=bool), mat.T),
         shape=(len(spatial_data), len(spatial_data))).tocsr()
         
-    condition = spatial_data['Condition'].unique()[0]
+    condition = spatial_data['condition'].unique()[0]
     orig_ident = spatial_data['orig.ident'].unique()[0]
 
     results = []

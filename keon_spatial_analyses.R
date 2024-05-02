@@ -171,6 +171,7 @@ get_LR_pairs = function() {
 #' @param spat_stats A data frame containing spatial statistics, which is the 
 #' output of 'get_spatial_stats'. 
 #' @param ref_level A character string specifying the reference level for the condition groups.
+#' @param comp_level A character string specifying the comparison level for the condition groups.
 #' @param min_nonzero_threshold A numeric value representing the minimum 
 #' threshold for the non-zero count ratio for each cell type pair and sample. 
 #' Default is 0.10.
@@ -193,6 +194,7 @@ get_LR_pairs = function() {
 
 get_spatial_differences = function(spat_stats, 
                                    ref_level,
+                                   comp_level,
                                    min_nonzero_threshold = 0.10, 
                                    min_data_count_threshold = 10,
                                    model_diagnostics = TRUE) {
@@ -210,6 +212,7 @@ get_spatial_differences = function(spat_stats,
   }
   spat_stats %>%
     filter(cell_type_pair %in% valid_pairs) %>%
+    filter(condition %in% c(ref_level, comp_level)) %>%
     mutate(condition = factor(condition), sample_ID = factor(sample_ID)) %>%
     mutate(condition = relevel(condition, ref = ref_level)) %>%
     group_by(cell_type_a, cell_type_b) %>%
@@ -277,14 +280,19 @@ plot_stats_heatmap = function(spat_stats, opt_order = FALSE) {
       o2 = seriate(dist(t(mat)), method = "OLO")[[1]]$order
       mat = mat[o1, o2]
     }
+    log_breaks = function(n, minval, maxval) {
+      breaks = exp(seq(log(minval + 1), log(maxval + 1), length.out = n)) - 1
+      return(breaks)
+    }
+    breaks = log_breaks(n = 51, minval = 0, maxval = 1)
     main = paste("cell type proximity", c, "\nmean_dmin:", 
                  round(mean(unique(spat_stats$d_min))),
                  "; mean_dmax:", round(mean(unique(spat_stats$d_max))))
     pheatmap(mat, 
              main = main, 
              na_col = "lightgrey",
-             color = colorRampPalette(c("white", "#813e8f", "#813e8f", "#4b0857"))(50), 
-             breaks = seq(0, 1, length.out = 51),
+             color = colorRampPalette(c("white","#813e8f","#813e8f", "#813e8f", "#4b0857"))(50), 
+             breaks = breaks,
              display_numbers = FALSE, border_color = NA, 
              cluster_rows = FALSE, cluster_cols = FALSE)
   }
@@ -371,7 +379,7 @@ plot_diff_heatmap = function(spat_diff, opt_order = FALSE, sig_level = 0.05, mai
 #'
 #' @return A ggplot object representing a bar plot of the top n
 #' differential statistics, with significant differences marked and 
-#' direction of change indicated.http://127.0.0.1:41877/graphics/plot_zoom_png?width=1200&height=900
+#' direction of change indicated.
 #'
 #' @examples
 #' plot_diff_barplot(spat_diff, 20, 0.01)
@@ -479,7 +487,7 @@ plot_diff_network = function(spat_diff, sig_level = 0.05, plot_insignificant = F
 #' have the most comparable cell densities.  
 #' 
 #' This function is not fully tested. It is common to see poorly representative
-#' spatial plots given the sparsity of MERFISH.
+#' spatial plots given the sparsity of some cell types in MERFISH data.
 #' 
 #' @param spat_stats A data frame containing spatial statistics, which is the output
 #' of 'get_spatial_stats'.
@@ -487,6 +495,8 @@ plot_diff_network = function(spat_diff, sig_level = 0.05, plot_insignificant = F
 #' is the output of 'get_spatial_differences'.
 #' @param cell_type_column A character string specifying the column in 'spat_stats'
 #' that contains cell type information.
+#' @param ref_level A character string specifying the reference level for the condition groups.
+#' @param comp_level A character string specifying the comparison level for the condition groups.
 #' @param cell_type_a A character string specifying the first cell type of interest.
 #' @param cell_type_b A character string specifying the second cell type of interest.
 #' @param min_b_count A numeric value representing the minimum count of 'b' cells
@@ -514,6 +524,7 @@ plot_diff_network = function(spat_diff, sig_level = 0.05, plot_insignificant = F
 plot_spatial_exemplars = function(spat_stats, 
                                   spat_diff, 
                                   cell_type_column,
+                                  ref_level, comp_level,
                                   select_cell_type_a, select_cell_type_b, 
                                   min_b_count = 0, min_all_count = 0,
                                   sample_area = 120,
@@ -522,11 +533,11 @@ plot_spatial_exemplars = function(spat_stats,
   select_samples = spat_stats %>%
     group_by(condition, sample_ID) %>%
     summarise(d_max = unique(d_max), .groups = 'drop') %>%
-    expand_grid(HX = .[.$condition == "HX", ], NX = .[.$condition == "NX", ]) %>%
-    mutate(diff = abs(HX$d_max - NX$d_max)) %>%
+    expand_grid(comp = .[.$condition == comp_level, ], ref = .[.$condition == ref_level, ]) %>%
+    mutate(diff = abs(comp$d_max - ref$d_max)) %>%
     arrange(diff) %>%
     slice(1) %>%
-    summarise(HX_ID = HX$sample_ID, NX_ID = NX$sample_ID) %>%
+    summarise(comp_ID = comp$sample_ID, ref_ID = ref$sample_ID) %>%
     as.character()
   
   circle_fun = function(center = c(0,0), r = 1, npoints = 100){
@@ -612,7 +623,9 @@ plot_spatial_exemplars = function(spat_stats,
     filter(#sample_ID %in% select_samples,
            cell_type_a == cell_type_a,
            cell_type_b == cell_type_b) %>%
-    mutate(condition, factor(condition, levels = c("NX","HX"))) %>%
+    filter(condition %in% c(ref_level, comp_level)) %>%
+    mutate(condition = factor(condition)) %>%
+    mutate(condition = relevel(condition, ref = ref_level)) %>%
     ggplot(., aes(x = condition, y = log(b_ratio))) +
     geom_violin(lwd = 1) +
     geom_boxplot(aes(fill = condition), width = 0.05, lwd = 1) +
@@ -630,19 +643,25 @@ plot_spatial_exemplars = function(spat_stats,
 # cell proximity analysis #######################################################
 
 # Load Seurat object
-sobject = readRDS("data/HX_Cortex.rds")
+# sobject = readRDS("data/HX_Cortex.rds") 
 # sobject = readRDS("data/CC_FINAL_dims10Seurat_Annotated.rds")
 # sobject = readRDS("data/SVZ_neuronal_subset_Seurat_FINAL.rds")
+
+sobject = readRDS("data/pregnancy/Annotated_CC.rds")
+sobject = readRDS("data/pregnancy/Annotated_Cortex_cleaned.rds")
+sobject = readRDS("data/pregnancy/Annotated_MPA_cleaned.rds")
+sobject = readRDS("data/pregnancy/Annotated_MPN_cleaned.rds")
+sobject = readRDS("data/pregnancy/Annotated_SVZ_cleaned.rds")
 
 # For each sample, get cell type proximities 
 samples = unique(sobject@meta.data$orig.ident)
 spat_stats = bind_rows(
   lapply(samples, function(s) {
-    spat_data = get_spatial_data(sobject, cell_type_column = "CellSubType", s)
+    spat_data = get_spatial_data(sobject, cell_type_column = "subcelltype", s)
     spat_data = r_to_py(spat_data)
     # See 'python_functions.py' for 'get_spatial_stats' documentation
-    stats = get_spatial_stats(spat_data, cell_type_column = "CellSubType", 
-                              d_min_scale = 0, d_max_scale = 10) %>%
+    stats = get_spatial_stats(spat_data, cell_type_column = "subcelltype", 
+                              d_min_scale = 0, d_max_scale = 5) %>%
       mutate(cell_type_pair = paste(cell_type_a, cell_type_b, sep = " -- "))
     return(stats)
   })
@@ -652,33 +671,28 @@ plot_stats_heatmap(spat_stats, opt_order = F)
 
 # Get differential proximities (estimate) between conditions
 spat_diff = get_spatial_differences(
-  spat_stats,  ref_level = "NX", 
-  min_nonzero_threshold = 0.10, min_data_count_threshold = 10, model_diagnostics = F
-)
+  spat_stats, ref_level = "CTL", comp_level = "POSTPART",
+  min_nonzero_threshold = 0.10, min_data_count_threshold = 10, model_diagnostics = F)
 
 # Differential cell type proximity plots 
-svglite::svglite(filename = "./figures/cell_type_proximity/diff_heatmap_CORTEX_05_pg.svg",
-                 height = 8, width = 9) 
-plot_diff_heatmap(spat_diff, opt_order = F, sig_level = 0.05)
-dev.off()
+plot_diff_heatmap(spat_diff, opt_order = F, sig_level = 0.05, main = "SVG -- POSTPART")
 
-plot_diff_barplot(spat_diff, n = 10, sig_level = 0.05)
-plot_diff_network(spat_diff, sig_level = 0.05, plot_insignificant = T, show_arrows = T)
+plot_diff_barplot(spat_diff, n = 10, sig_level = 0.1)
+plot_diff_network(spat_diff, sig_level = 0.1, plot_insignificant = T, show_arrows = T)
 
-plot_spatial_exemplars(spat_stats, spat_diff, cell_type_column = "CellSubType", 
-                       select_cell_type_a = "Pre-OL", 
-                       select_cell_type_b = "Homeostatic astrocytes 2",
+plot_spatial_exemplars(spat_stats, spat_diff, cell_type_column = "subcelltype", 
+                       ref_level = "CTL", comp_level = "PREG",
+                       select_cell_type_a = "ExN L1-3", 
+                       select_cell_type_b = "InN",
                        sample_area = 120,
                        seed = 123)
 
 
-
-
-
-
-
-
-
+get_spatial_data(sobject) %>%
+  ggplot(., aes(x, y, color = subcelltype)) + 
+  geom_point(size = 0.3) + 
+  theme_minimal() +
+  facet_wrap(~orig.ident)
 
 
 
