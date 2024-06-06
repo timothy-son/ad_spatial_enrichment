@@ -55,8 +55,8 @@ get_spatial_data = function(seurat_object, cell_type_column, sample=NULL) {
   images = names(seurat_object@images)
   meta = seurat_object@meta.data %>% 
     mutate(cell_ID = row.names(.), sample_ID = orig.ident) 
-    # mutate(!!cell_type_column := str_replace_all(
-    #   !!sym(cell_type_column), " ", "")) 
+  # mutate(!!cell_type_column := str_replace_all(
+  #   !!sym(cell_type_column), " ", "")) 
   if (!is.null(sample)) {
     meta = filter(meta, sample_ID %in% sample)
   }
@@ -528,7 +528,8 @@ plot_spatial_exemplars = function(spat_stats,
                                   select_cell_type_a, select_cell_type_b, 
                                   min_b_count = 0, min_all_count = 0,
                                   sample_area = 120,
-                                  seed = NULL) {
+                                  seed = NULL,
+                                  spatial_data) {
   
   select_samples = spat_stats %>%
     group_by(condition, sample_ID) %>%
@@ -582,7 +583,9 @@ plot_spatial_exemplars = function(spat_stats,
         sample_n(size = 1) %>%
         pull(cell_ID)
     }
-    spat_data = get_spatial_data(sobject, sample = samp)
+#    spat_data = get_spatial_data(sobject, sample = samp)
+    spat_data = spatial_data %>%
+      filter(orig.ident==samp)
     select_cell  = spat_data %>% filter(cell_ID == select_cell_id)
     d_max = spat_stats %>% filter(sample_ID == samp) %>% pull(d_max) %>% unique()
     
@@ -603,7 +606,7 @@ plot_spatial_exemplars = function(spat_stats,
                 aes(x, y), linewidth = 1, linetype = "solid", color = "black") +
       geom_point(data = spat_data_square %>% 
                    filter(!.data[[cell_type_column]] %in% 
-                          c(select_cell_type_a, select_cell_type_b)), 
+                            c(select_cell_type_a, select_cell_type_b)), 
                  aes(x, y), size = 3, shape = 16, color = "lightgrey") + 
       geom_point(data = spat_data_square %>%
                    filter(.data[[cell_type_column]] == select_cell_type_b), 
@@ -621,8 +624,8 @@ plot_spatial_exemplars = function(spat_stats,
   p2 = plt_lst[[2]]
   p3 = spat_stats %>%
     filter(#sample_ID %in% select_samples,
-           cell_type_a == cell_type_a,
-           cell_type_b == cell_type_b) %>%
+      cell_type_a == cell_type_a,
+      cell_type_b == cell_type_b) %>%
     filter(condition %in% c(ref_level, comp_level)) %>%
     mutate(condition = factor(condition)) %>%
     mutate(condition = relevel(condition, ref = ref_level)) %>%
@@ -640,65 +643,102 @@ plot_spatial_exemplars = function(spat_stats,
   p1 / p2 | p3
 } 
 
-# cell proximity analysis #######################################################
 
-# Load Seurat object
-# sobject = readRDS("data/HX_Cortex.rds") 
-# sobject = readRDS("data/CC_FINAL_dims10Seurat_Annotated.rds")
-# sobject = readRDS("data/SVZ_neuronal_subset_Seurat_FINAL.rds")
+# SEA_AD Spatial Analysis ######################################################
 
-sobject = readRDS("data/pregnancy/Annotated_CC.rds")
-sobject = readRDS("data/pregnancy/Annotated_Cortex_cleaned.rds")
-sobject = readRDS("data/pregnancy/Annotated_MPA_cleaned.rds")
-sobject = readRDS("data/pregnancy/Annotated_MPN_cleaned.rds")
-sobject = readRDS("data/pregnancy/Annotated_SVZ_cleaned.rds")
 
-# For each sample, get cell type proximities 
-samples = unique(sobject@meta.data$orig.ident)
+# Packages
+library(anndata)
+library(patchwork)
+
+# Read in spatial coordinates and metadata
+hfivead <- read_h5ad("./data/raw/SEAAD_MTG_MERFISH_all-nuclei.2023-05-08 (1).h5ad")
+obsm <- hfivead$obsm
+hfivead_metadata <- hfivead$obs
+hfivead_metadata_obsm <- cbind(hfivead_metadata, obsm)
+
+# Filter unused cells
+hfivead_metadata_obsm_filtered <- hfivead_metadata_obsm %>%
+  filter(`Used in analysis` == 1)
+
+# Create cell_id column
+row_names <- rownames(hfivead_metadata_obsm_filtered)
+hfivead_metadata_obsm_filtered$cell_ID <- row_names
+
+# Create new data frame using relevant columns
+hfivead_subset <- hfivead_metadata_obsm_filtered[, c("X_selected_cell_spatial_tiled.1", "X_selected_cell_spatial_tiled.2", "Section", "Class", "Subclass", "Supertype", "Donor ID", "Continuous Pseudo-progression Score", "cell_ID")]
+
+# Rename column names
+names(hfivead_subset) <- c("x", "y", "orig.ident", "Class", "Subclass", "Supertype", "Donor ID", "condition", "cell_ID")
+
+# Binarize condition (AD or no_AD) using mean CPS
+hfivead_subset$Pseudoprogression_score <- hfivead_subset$condition
+average_value <- mean(hfivead_subset$condition)
+hfivead_subset$condition <- ifelse(hfivead_subset$condition < average_value, "no_AD", "AD")
+
+# Box plot for CPS by condition
+ggplot(hfivead_subset, aes(x = condition, y = Pseudoprogression_score)) + 
+  geom_boxplot() + 
+  labs(title = "Box plot of Pseudoprogression scores grouped by condition", x = "Condition", y = "Pseudoprogression_score")
+
+# Update data frame by only taking upper quartile of AD and lower quartile of no_AD
+quartiles <- hfivead_subset %>%
+  group_by(condition) %>%
+  summarise(
+    upper_quartile = quantile(Pseudoprogression_score, 0.75),
+    lower_quartile = quantile(Pseudoprogression_score, 0.25)
+  )
+hfivead_subset <- hfivead_subset %>%
+  filter((condition == "AD" & Pseudoprogression_score >= quartiles$upper_quartile[quartiles$condition == "AD"]) |
+           (condition == "no_AD" & Pseudoprogression_score <= quartiles$lower_quartile[quartiles$condition == "no_AD"]))
+
+
+# Format object types of data frame
+samples = unique(hfivead_subset$`orig.ident`)[-59]
+samples <- as.character(samples)
+hfivead_subset$Subclass <- as.character(hfivead_subset$Subclass)
+hfivead_subset$orig.ident <- as.character(hfivead_subset$orig.ident)
+
+# Get spatial stats
 spat_stats = bind_rows(
   lapply(samples, function(s) {
-    spat_data = get_spatial_data(sobject, cell_type_column = "subcelltype", s)
+    spat_data = hfivead_subset %>%
+      filter(orig.ident==s)
     spat_data = r_to_py(spat_data)
     # See 'python_functions.py' for 'get_spatial_stats' documentation
-    stats = get_spatial_stats(spat_data, cell_type_column = "subcelltype", 
-                              d_min_scale = 0, d_max_scale = 5) %>%
+    stats = get_spatial_stats(spat_data, cell_type_column = "Subclass", 
+                              d_min_scale = 0, d_max_scale = 30) %>%
       mutate(cell_type_pair = paste(cell_type_a, cell_type_b, sep = " -- "))
     return(stats)
   })
 )
-# Plot cell type proximity (b_ratio) heatmaps for each condition 
+
+# Format object types of spat_stats
+spat_stats$cell_type_a <- as.character(spat_stats$cell_type_a)
+
+# Spatial stats heatmap
 plot_stats_heatmap(spat_stats, opt_order = F)
 
-# Get differential proximities (estimate) between conditions
+# Get spatial differences
 spat_diff = get_spatial_differences(
-  spat_stats, ref_level = "CTL", comp_level = "POSTPART",
-  min_nonzero_threshold = 0.10, min_data_count_threshold = 10, model_diagnostics = F)
+  spat_stats,  ref_level = "no_AD", comp_level = "AD", 
+  min_nonzero_threshold = 0.10, min_data_count_threshold = 10, model_diagnostics = F
+)
 
-# Differential cell type proximity plots 
-plot_diff_heatmap(spat_diff, opt_order = F, sig_level = 0.05, main = "SVG -- POSTPART")
+# Spatial differences heatmap
+plot_diff_heatmap(spat_diff, opt_order = F, sig_level = 0.1, main = "SEA_AD -- Alzheimer's")
 
+# Spatial differences barplot
 plot_diff_barplot(spat_diff, n = 10, sig_level = 0.1)
+
+# Spatial differences network plot
 plot_diff_network(spat_diff, sig_level = 0.1, plot_insignificant = T, show_arrows = T)
 
-plot_spatial_exemplars(spat_stats, spat_diff, cell_type_column = "subcelltype", 
-                       ref_level = "CTL", comp_level = "PREG",
-                       select_cell_type_a = "ExN L1-3", 
-                       select_cell_type_b = "InN",
+# Plot spatial exemplars
+plot_spatial_exemplars(spat_stats, spat_diff, cell_type_column = "Subclass", 
+                       ref_level = "no_AD", comp_level = "AD",
+                       select_cell_type_a = "Sst", 
+                       select_cell_type_b = "L4 IT",
                        sample_area = 120,
-                       seed = 123)
-
-
-get_spatial_data(sobject) %>%
-  ggplot(., aes(x, y, color = subcelltype)) + 
-  geom_point(size = 0.3) + 
-  theme_minimal() +
-  facet_wrap(~orig.ident)
-
-
-
-
-
-
-
-
-
+                       seed = 123,
+                       spatial_data = hfivead_subset)
