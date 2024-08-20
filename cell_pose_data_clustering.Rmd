@@ -1,0 +1,118 @@
+---
+title: "cell_pose_data_clustering"
+output: html_document
+date: "2024-06-12"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load packages.
+
+```{r}
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(Seurat)
+})
+```
+
+The code below reads in the cell_pose_data that is publicly available from the Seattle Alzheimer's MERFISH dataset.
+The selected tissue sample is H20.33.001.CX28.MTG.02.007.1.02.03.
+
+```{r}
+cell_pose_data = read_csv('./data/raw/cellpose-detected_transcripts (2).csv')
+```
+
+Create count matrix of gene expression. This will help create a Seurat object.
+
+```{r}
+count_matrix <- cell_pose_data %>%
+  filter(!cell_id == -1) %>%
+  mutate(cell_id = as.factor(as.character(cell_id))) %>% 
+  group_by(cell_id, gene) %>% 
+  dplyr::select(gene, cell_id) %>% 
+  summarise(counts = n()) %>% 
+  pivot_wider(names_from = gene, values_from = counts)
+new_count_matrix <- t(count_matrix)
+# Extract the first row as column names
+column_names <- new_count_matrix[1, ]
+
+# Remove the first row from the count matrix
+new_count_matrix <- new_count_matrix[-1, ]
+
+# Set the column names
+colnames(new_count_matrix) <- column_names %>% make.names(unique = TRUE)
+
+new_count_matrix[is.na(new_count_matrix)] <- 0
+```
+
+Create metadata for the tissue sample. This will help create a Seurat object.
+
+```{r}
+distinct_cell_pose_data <- cell_pose_data %>%
+  filter(!cell_id == -1)%>%
+  mutate(cell_id = as.factor(as.character(cell_id)))
+
+filtered <- distinct(distinct_cell_pose_data, cell_id, .keep_all = TRUE)
+
+cell_pose_metadata <- filtered %>%
+  mutate(cell_id = make.names(cell_id, unique = TRUE))
+
+colnames(cell_pose_metadata)[colnames(cell_pose_metadata) == "x"] <- "X"
+colnames(cell_pose_metadata)[colnames(cell_pose_metadata) == "y"] <- "Y"
+colnames(cell_pose_metadata)[colnames(cell_pose_metadata) == "cell_id"] <- "CellID"
+
+cell_pose_metadata$donor_id <- "H21.33.001"
+
+cell_pose_metadata
+```
+
+Create a Seurat object.
+
+```{r}
+vizgen.obj <- CreateSeuratObject(counts = new_count_matrix, meta.data = cell_pose_metadata)
+vizgen.obj
+```
+
+Pre-processing and standard unsupervised clustering analysis.
+
+```{r}
+vizgen.obj <- SCTransform(vizgen.obj)
+vizgen.obj <- RunPCA(vizgen.obj, npcs = 30, features = rownames(vizgen.obj))
+vizgen.obj <- RunUMAP(vizgen.obj, dims = 1:30)
+vizgen.obj <- FindNeighbors(vizgen.obj, reduction = "pca", dims = 1:30)
+vizgen.obj <- FindClusters(vizgen.obj, resolution = 0.3)
+```
+
+UMAP plot.
+
+```{r}
+DimPlot(vizgen.obj, reduction = "umap")
+```
+
+UMAP by donor_id.
+
+```{r}
+DimPlot(vizgen.obj, group.by = "donor_id")
+```
+
+Supplementary plots.
+
+```{r}
+FeaturePlot(vizgen.obj, features = "nFeature_RNA")
+
+VlnPlot(vizgen.obj, features = "nFeature_RNA")
+
+FeaturePlot(vizgen.obj, features = "MOG")
+
+VlnPlot(vizgen.obj, features = "MOG")
+
+FeaturePlot(vizgen.obj, features = "PVALB")
+
+VlnPlot(vizgen.obj, features = "PVALB")
+
+FeaturePlot(vizgen.obj, features = "GAD2")
+
+VlnPlot(vizgen.obj, features = "GAD2")
+```
