@@ -644,12 +644,16 @@ plot_spatial_exemplars = function(spat_stats,
 } 
 
 
-# SEA_AD Spatial Analysis ######################################################
-
+# SEA_AD SPATIAL ANALYSIS ######################################################
 
 # Packages
 library(anndata)
 library(patchwork)
+library(ggpubr)
+
+
+# SEATTLE ALZHEIMER'S BRAIN ATLAS MERFISH DATASET PROCESSING
+
 
 # Read in spatial coordinates and metadata
 hfivead <- read_h5ad("./data/raw/SEAAD_MTG_MERFISH_all-nuclei.2023-05-08 (1).h5ad")
@@ -661,17 +665,22 @@ hfivead_metadata_obsm <- cbind(hfivead_metadata, obsm)
 hfivead_metadata_obsm_filtered <- hfivead_metadata_obsm %>%
   filter(`Used in analysis` == 1)
 
-# Create cell_id column
+# Create and format data frame required for local cell type proportion analysis
 row_names <- rownames(hfivead_metadata_obsm_filtered)
 hfivead_metadata_obsm_filtered$cell_ID <- row_names
+hfivead_subset <- hfivead_metadata_obsm_filtered[, c("X_selected_cell_spatial_tiled.1", "X_selected_cell_spatial_tiled.2", "Section", "Class", "Subclass", "Supertype", "Donor ID", "Continuous Pseudo-progression Score", "cell_ID", "Sex")]
+names(hfivead_subset) <- c("x", "y", "orig.ident", "Class", "Subclass", "Supertype", "Donor ID", "condition", "cell_ID", "Sex")
 
-# Create new data frame using relevant columns
-hfivead_subset <- hfivead_metadata_obsm_filtered[, c("X_selected_cell_spatial_tiled.1", "X_selected_cell_spatial_tiled.2", "Section", "Class", "Subclass", "Supertype", "Donor ID", "Continuous Pseudo-progression Score", "cell_ID")]
+samples = unique(hfivead_subset$`orig.ident`)[-59]
+samples <- as.character(samples)
+hfivead_subset$Subclass <- as.character(hfivead_subset$Subclass)
+hfivead_subset$orig.ident <- as.character(hfivead_subset$orig.ident)
 
-# Rename column names
-names(hfivead_subset) <- c("x", "y", "orig.ident", "Class", "Subclass", "Supertype", "Donor ID", "condition", "cell_ID")
 
-# Binarize condition (AD or no_AD) using mean CPS
+# GLOBAL CELL TYPE PROPORTION ANALYSIS
+
+
+# Binarize condition (no_AD or AD) using mean CPS
 hfivead_subset$Pseudoprogression_score <- hfivead_subset$condition
 average_value <- mean(hfivead_subset$condition)
 hfivead_subset$condition <- ifelse(hfivead_subset$condition < average_value, "no_AD", "AD")
@@ -681,7 +690,7 @@ ggplot(hfivead_subset, aes(x = condition, y = Pseudoprogression_score)) +
   geom_boxplot() + 
   labs(title = "Box plot of Pseudoprogression scores grouped by condition", x = "Condition", y = "Pseudoprogression_score")
 
-# Update data frame by only taking upper quartile of AD and lower quartile of no_AD
+# OPTIONAL: Update data frame by only taking upper quartile of AD and lower quartile of no_AD
 quartiles <- hfivead_subset %>%
   group_by(condition) %>%
   summarise(
@@ -692,12 +701,132 @@ hfivead_subset <- hfivead_subset %>%
   filter((condition == "AD" & Pseudoprogression_score >= quartiles$upper_quartile[quartiles$condition == "AD"]) |
            (condition == "no_AD" & Pseudoprogression_score <= quartiles$lower_quartile[quartiles$condition == "no_AD"]))
 
+# Data frame for global proportion analysis by subclass
+total_counts <- hfivead_subset %>%
+  group_by(orig.ident, condition, Sex) %>%
+  summarise(total_count = n(), .groups = 'drop')
 
-# Format object types of data frame
-samples = unique(hfivead_subset$`orig.ident`)[-59]
-samples <- as.character(samples)
-hfivead_subset$Subclass <- as.character(hfivead_subset$Subclass)
-hfivead_subset$orig.ident <- as.character(hfivead_subset$orig.ident)
+subclass_counts <- hfivead_subset %>%
+  group_by(orig.ident, Subclass) %>%
+  summarise(subclass_count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Subclass, values_from = subclass_count, values_fill = list(subclass_count = 0))
+
+subclass_proportions <- total_counts %>%
+  left_join(subclass_counts, by = "orig.ident")
+
+subclass_individual_proportions <- setdiff(names(subclass_proportions), c("orig.ident", "condition", "Sex", "total_count"))
+
+subclass_proportions <- subclass_proportions %>%
+  mutate(across(all_of(subclass_individual_proportions), ~ . / total_count, .names = "proportion_{.col}"))
+
+# Data frame for global proportion analysis by supertype
+total_counts <- hfivead_subset %>%
+  group_by(orig.ident, condition, Sex) %>%
+  summarise(total_count = n(), .groups = 'drop')
+
+supertype_counts <- hfivead_subset %>%
+  group_by(orig.ident, Supertype) %>%
+  summarise(supertype_count = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = Supertype, values_from = supertype_count, values_fill = list(supertype_count = 0))
+
+supertype_proportions <- total_counts %>%
+  left_join(supertype_counts, by = "orig.ident")
+
+supertype_individual_proportions <- setdiff(names(supertype_proportions), c("orig.ident", "condition", "Sex", "total_count"))
+
+supertype_proportions <- supertype_proportions %>%
+  mutate(across(all_of(supertype_individual_proportions), ~ . / total_count, .names = "proportion_{.col}"))
+
+# Subclass proportions boxplot analysis
+subclass_proportions_boxplots <- subclass_proportions %>%
+  pivot_longer(
+    cols = starts_with("proportion_"),
+    names_to = "subclass",
+    names_prefix = "proportion_",
+    values_to = "proportion"
+  )
+
+subclass_proportions_boxplots$condition <- factor(subclass_proportions_boxplots$condition, levels = c("no_AD", "AD"))
+
+ggplot(subclass_proportions_boxplots, aes(x = subclass, y = proportion, fill = condition)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("no_AD" = "lightblue", "AD" = "#1f77b4")) +
+  labs(title = "Cell Subclass Proportions by Condition",
+       x = "Cell Subclass",
+       y = "Proportion") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8)) +
+  stat_compare_means(aes(group = condition), label = "p.signif")
+
+# Supertype proportions boxplot analysis
+supertype_proportions_boxplots <- supertype_proportions %>%
+  pivot_longer(
+    cols = starts_with("proportion_"),
+    names_to = "supertype",
+    names_prefix = "proportion_",
+    values_to = "proportion"
+  )
+
+supertype_proportions_boxplots$condition <- factor(supertype_proportions_boxplots$condition, levels = c("no_AD", "AD"))
+
+signif_results <- compare_means(proportion ~ condition, data = supertype_proportions_boxplots, group.by = "supertype")
+
+signif_results <- signif_results[signif_results$p.signif != "ns", ]
+significant_supertypes <- signif_results$supertype
+
+sig_proportions_supertypes <- supertype_proportions_boxplots %>%
+  filter(supertype %in% significant_supertypes)
+
+ggplot(sig_proportions_supertypes, aes(x = supertype, y = proportion, fill = condition)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("no_AD" = "lightblue", "AD" = "#1f77b4")) +
+  labs(title = "Cell Supertype Proportions by Condition",
+       x = "Cell Supertype",
+       y = "Proportion") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8)) +
+  stat_compare_means(aes(group = condition), label = "p.signif")
+
+# Subclass global proportions by sex
+ggplot(subclass_proportions_boxplots, aes(x = subclass, y = proportion, fill = Sex)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("Male" = "blue", "Female" = "pink")) +  # Customize colors
+  labs(title = "Cell Subclass Proportions by Sex",
+       x = "Cell Subclass",
+       y = "Proportion") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8)) +
+  stat_compare_means(aes(group = Sex), label = "p.signif")
+  
+# Separate analysis for significant differences in global proportions by sex
+signif_sex_results <- compare_means(proportion ~ Sex, data = subclass_proportions_boxplots, group.by = "subclass")
+
+signif_sex_results <- signif_sex_results[signif_sex_results$p <= 0.05, ]
+significant_subclasses <- signif_sex_results$subclass
+
+proportions_sex_differences <- subclass_proportions_boxplots %>%
+  filter(subclass %in% significant_subclasses)
+  
+proportions_male <- proportions_sex_differences %>% filter(Sex == "Male")
+proportions_female <- proportions_sex_differences %>% filter(Sex == "Female")
+
+ggplot(proportions_male, aes(x = subclass, y = proportion, fill = condition)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("no_AD" = "lightblue", "AD" = "#1f77b4")) +
+  labs(title = "Cell Subclass Proportions by Condition for Males",
+       x = "Cell Subclass",
+       y = "Proportion") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  stat_compare_means(aes(group = condition), label = "p.signif")
+
+ggplot(proportions_female, aes(x = subclass, y = proportion, fill = condition)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("no_AD" = "#FFF5EE", "AD" = "#F8C8DC")) +
+  labs(title = "Cell Subclass Proportions by Condition for Females",
+       x = "Cell Subclass",
+       y = "Proportion") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  stat_compare_means(aes(group = condition), label = "p.signif")
+
+
+# LOCAL CELL TYPE PROPORTION ANALYSIS
 
 # Get spatial stats
 spat_stats = bind_rows(
@@ -707,7 +836,7 @@ spat_stats = bind_rows(
     spat_data = r_to_py(spat_data)
     # See 'python_functions.py' for 'get_spatial_stats' documentation
     stats = get_spatial_stats(spat_data, cell_type_column = "Subclass", 
-                              d_min_scale = 0, d_max_scale = 30) %>%
+                              d_min_scale = 0, d_max_scale = 10) %>%
       mutate(cell_type_pair = paste(cell_type_a, cell_type_b, sep = " -- "))
     return(stats)
   })
